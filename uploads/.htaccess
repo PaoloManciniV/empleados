@@ -1,0 +1,21 @@
+# ============================================================
+# uploads/.htaccess
+# Bloquea la ejecución de cualquier script dentro de esta
+# carpeta. Los archivos solo pueden ser descargados/vistos,
+# nunca ejecutados por el servidor.
+# ============================================================
+
+# Deshabilitar ejecución de CGI/scripts
+Options -ExecCGI
+RemoveHandler .php .php3 .php4 .php5 .php7 .php8 .phtml .phar
+RemoveType .php .php3 .php4 .php5 .php7 .php8 .phtml .phar
+
+# Denegar acceso directo a cualquier archivo PHP
+<FilesMatch "\.(php|php3|php4|php5|php7|php8|phtml|phar|pl|py|cgi|sh)$">
+    Require all denied
+</FilesMatch>
+
+# Forzar descarga en lugar de ejecución para estos tipos
+<FilesMatch "\.(pdf|doc|docx|xls|xlsx)$">
+    Header set Content-Disposition "attachment"
+</FilesMatch>

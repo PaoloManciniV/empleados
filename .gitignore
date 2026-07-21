@@ -1,0 +1,29 @@
+# ============================================================
+# .gitignore — Proyecto empleados (Agro-Costa RRHH)
+# ============================================================
+
+# Archivos subidos por los usuarios (datos personales: fotos, PDFs, soportes)
+# Se ignora todo el contenido pero se conserva la carpeta y su .htaccess
+uploads/*
+!uploads/.htaccess
+
+# Variables de entorno con credenciales (nunca subir a GitHub)
+.env
+.env.*
+private/.env
+
+# Archivos temporales y de sistema
+*.log
+*.tmp
+Thumbs.db
+.DS_Store
+desktop.ini
+
+# Editores / IDEs
+.vscode/
+.idea/
+*.swp
+*.bak
+
+# Dependencias de Composer (si en algún momento usas composer install)
+vendor/
