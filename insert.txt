@@ -1,0 +1,48 @@
+-- 1. CREACIÓN DE LA ESTRUCTURA (TABLAS)
+
+CREATE TABLE IF NOT EXISTS `usuarios` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `username` varchar(50) NOT NULL,
+  `password` varchar(255) NOT NULL,
+  `nombre_completo` varchar(100) DEFAULT NULL,
+  `rol` varchar(20) DEFAULT NULL, -- admin, jefe, empleado
+  `correo` varchar(100) DEFAULT NULL,
+  `cedula` varchar(20) DEFAULT '',
+  `cargo` varchar(100) DEFAULT '',
+  `area` varchar(100) DEFAULT '',
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+CREATE TABLE IF NOT EXISTS `solicitudes` (
+  `id` int(11) NOT NULL AUTO_INCREMENT,
+  `empleado` varchar(100) DEFAULT NULL,
+  `correo_empleado` varchar(100) DEFAULT NULL,
+  `correo_jefe` varchar(100) DEFAULT NULL,
+  `motivo` varchar(50) DEFAULT NULL,
+  `estado` varchar(20) DEFAULT 'Pendiente',
+  `fecha` timestamp NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  `fecha_inicio` date DEFAULT NULL,
+  `fecha_fin` date DEFAULT NULL,
+  `hora_inicio` time DEFAULT NULL,
+  `hora_fin` time DEFAULT NULL,
+  `notas` text,
+  `observacion_jefe` text,
+  `archivo_soporte` varchar(255) DEFAULT NULL,
+  PRIMARY KEY (`id`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;
+
+-- 2. INSERCIÓN DE USUARIOS (ADMIN, JEFES Y EMPLEADOS)
+
+INSERT INTO `usuarios` (`username`, `password`, `nombre_completo`, `rol`, `correo`, `cedula`, `cargo`, `area`) VALUES
+-- Administrador General
+('admin', 'admin123', 'RRHH AgroCosta', 'admin', 'rrosado@agro-costa.com', '000000', 'Jefe RRHH', 'Administración'),
+
+-- Jefe de Área
+('man@agro-costa.com', 'paolo123', 'Paolo Mancini', 'jefe', 'man@agro-costa.com', '12345678', 'Jefe de Operaciones', 'Operaciones'),
+
+-- Empleados
+('fabrizio', 'paolo123', 'Fabrizio', 'empleado', 'fabrizio@gmail.com', '1045728398', 'Asesor Comercial', 'Comercial'),
+('oscar', 'paolo123', 'Oscar', 'empleado', 'oscar@gmail.com', '1045728399', 'Asesor Comercial', 'Comercial'),
+('julio', 'paolo123', 'Julio', 'empleado', 'julio@gmail.com', '1045728400', 'Asesor Comercial', 'Comercial'),
+('ana', 'paolo123', 'Ana', 'empleado', 'ana@gmail.com', '1045728401', 'Servicios Generales', 'Mantenimiento'),
+('josemiguel', 'paolo123', 'Jose Miguel', 'empleado', 'josemiguel@gmail.com', '1045728402', 'Conductor', 'Logística');
