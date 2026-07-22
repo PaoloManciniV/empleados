@@ -53,10 +53,45 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $detalle_permiso = '';
     }
 
-    $hora_inicio_raw = $_POST['hora_inicio'];
-    $hora_fin_raw    = $_POST['hora_fin'];
+    $hora_inicio_raw = $_POST['hora_inicio'] ?? '';
+    $hora_fin_raw    = $_POST['hora_fin'] ?? '';
     $h_ini = (!empty($hora_inicio_raw)) ? date("H:i:s", strtotime($hora_inicio_raw)) : '00:00:00';
     $h_fin = (!empty($hora_fin_raw))    ? date("H:i:s", strtotime($hora_fin_raw))    : '00:00:00';
+
+    // --- PERMISO RECURRENTE (horario academico) - paolo ---
+    // el horario real va por dia en la tabla solicitud_recurrencia, no en la
+    // solicitud. armamos aqui la lista de dias validando en servidor.
+    $es_recurrente     = ($motivo === 'Permiso Recurrente');
+    $dias_recurrentes  = []; // cada item: [dia_semana, hora_ini(H:i:s), hora_fin(H:i:s)]
+    if ($es_recurrente) {
+        // en recurrente el horario de la solicitud queda en 00:00:00 (dia completo neutro)
+        $h_ini = '00:00:00';
+        $h_fin = '00:00:00';
+
+        $dias_post = $_POST['rec_dia']      ?? [];
+        $ini_post  = $_POST['rec_hora_ini'] ?? [];
+        $fin_post  = $_POST['rec_hora_fin'] ?? [];
+
+        foreach ($dias_post as $num => $marcado) {
+            $num = (int)$num;
+            if ($num < 1 || $num > 7) { continue; } // solo 1..7 (lun..dom)
+            $hi_raw = $ini_post[$num] ?? '';
+            $hf_raw = $fin_post[$num] ?? '';
+            if ($hi_raw === '' || $hf_raw === '') {
+                die("Error: en el permiso recurrente todos los dias marcados deben tener hora inicio y fin. Vuelve atras y completa.");
+            }
+            $hi = date("H:i:s", strtotime($hi_raw));
+            $hf = date("H:i:s", strtotime($hf_raw));
+            if ($hf <= $hi) {
+                die("Error: en el permiso recurrente la hora fin debe ser posterior a la hora inicio en cada dia. Vuelve atras y corrige.");
+            }
+            $dias_recurrentes[] = [$num, $hi, $hf];
+        }
+
+        if (empty($dias_recurrentes)) {
+            die("Error: para un permiso recurrente debes marcar al menos un dia de la semana con su horario. Vuelve atras e intenta de nuevo.");
+        }
+    }
 
     $ahora_envio = date("Y-m-d H:i:s");
 
@@ -129,6 +164,27 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $id  = $db->lastInsertId();
         $url = ($_ENV['APP_URL'] ?? 'https://agro-costa.com/empleados') . "/gestionar.php?id=" . $id;
 
+        // --- guardar los dias del permiso recurrente y armar su bloque para el correo - paolo ---
+        $bloque_recurrente = '';
+        if ($es_recurrente && !empty($dias_recurrentes)) {
+            $nombres_dias = [1=>'Lunes',2=>'Martes',3=>'Miercoles',4=>'Jueves',5=>'Viernes',6=>'Sabado',7=>'Domingo'];
+            $insRec = $db->prepare("INSERT INTO solicitud_recurrencia (solicitud_id, dia_semana, hora_inicio, hora_fin) VALUES (?, ?, ?, ?)");
+            $filas_html = '';
+            foreach ($dias_recurrentes as $dr) {
+                list($dnum, $dhi, $dhf) = $dr;
+                $insRec->execute([$id, $dnum, $dhi, $dhf]);
+                $dia_nom = $nombres_dias[$dnum] ?? '';
+                $hi12 = htmlspecialchars(date('g:i A', strtotime($dhi)), ENT_QUOTES, 'UTF-8');
+                $hf12 = htmlspecialchars(date('g:i A', strtotime($dhf)), ENT_QUOTES, 'UTF-8');
+                $filas_html .= "<li><strong>$dia_nom:</strong> $hi12 a $hf12</li>";
+            }
+            $bloque_recurrente = "
+                <div style='background-color:#FFF7CC; border:2px solid #FFCD00; border-radius:10px; padding:15px; margin-top:15px;'>
+                    <strong style='color:#8a6d00; text-transform:uppercase; font-size:13px;'>&#128197; Dias y horarios del permiso recurrente:</strong>
+                    <ul style='margin:8px 0 0 0; color:#000;'>$filas_html</ul>
+                </div>";
+        }
+
         // Sanitizar para el correo HTML
         $e_empleado     = htmlspecialchars($empleado,        ENT_QUOTES, 'UTF-8');
         $e_cargo        = htmlspecialchars($cargo,           ENT_QUOTES, 'UTF-8');
@@ -151,11 +207,27 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
         $e_hora_ini     = htmlspecialchars($hora_inicio_raw ?: 'Día completo', ENT_QUOTES, 'UTF-8');
         $e_hora_fin     = htmlspecialchars($hora_fin_raw    ?: 'Día completo', ENT_QUOTES, 'UTF-8');
 
+        // en recurrente el horario no va en una sola linea (va por dia en el bloque) - paolo
+        $linea_horario = $es_recurrente
+            ? "<p><strong>Horario:</strong> ver dias y horarios abajo</p>"
+            : "<p><strong>Horario:</strong> $e_hora_ini a $e_hora_fin</p>";
+
         $mail = crearMailer();
         $mail->addAddress($correo_jefe);
         $mail->addCC($_ENV['MAIL_CC'] ?? 'nomina@agro-costa.com');
         $mail->addCC('alba@agro-costa.com');
         $mail->addCC('sst@agro-costa.com');
+
+        // en permiso recurrente tambien notificamos al propio empleado - paolo
+        if ($es_recurrente) {
+            $stmtCorreoEmp = $db->prepare("SELECT correo FROM usuarios WHERE cedula = ? LIMIT 1");
+            $stmtCorreoEmp->execute([$cedula]);
+            $correo_empleado = $stmtCorreoEmp->fetchColumn();
+            if (!empty($correo_empleado)) {
+                $mail->addCC($correo_empleado);
+            }
+        }
+
         $mail->isHTML(true);
         $mail->Subject = "NUEVA SOLICITUD: $e_empleado ($e_motivo)";
         $mail->Body = "
@@ -170,8 +242,9 @@ if ($_SERVER['REQUEST_METHOD'] == 'POST') {
                         <p><strong>Cargo:</strong> $e_cargo</p>
                         <p><strong>Motivo:</strong> $e_motivo</p>
                         $bloque_detalle
+                        $bloque_recurrente
                         <p><strong>Fechas:</strong> Del $e_fecha_inicio al $e_fecha_fin</p>
-                        <p><strong>Horario:</strong> $e_hora_ini a $e_hora_fin</p>
+                        $linea_horario
                         <p><strong>Notas:</strong> <em>$e_notas</em></p>
                         <div style='background: #f4f4f4; padding: 15px; border-radius: 10px; margin-top: 15px; border: 1px solid #eeeeee;'>
                             <strong style='color: #000000;'>Soportes Adjuntos:</strong><br>

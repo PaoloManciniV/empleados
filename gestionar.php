@@ -23,6 +23,19 @@ $solicitud = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$solicitud) { die("Solicitud no encontrada."); }
 
+// si es permiso recurrente, traemos los dias y horarios para mostrarlos - paolo
+$recurrencia = [];
+if ($solicitud['motivo'] === 'Permiso Recurrente') {
+    $stmtRec = $db->prepare("SELECT dia_semana, hora_inicio, hora_fin FROM solicitud_recurrencia WHERE solicitud_id = ? ORDER BY dia_semana ASC");
+    $stmtRec->execute([$id_solicitud]);
+    $recurrencia = $stmtRec->fetchAll(PDO::FETCH_ASSOC);
+}
+// nombre del dia 1=lunes ... 7=domingo - paolo
+function nombreDiaSemanaGest($n) {
+    $d = [1=>'Lunes',2=>'Martes',3=>'Miercoles',4=>'Jueves',5=>'Viernes',6=>'Sabado',7=>'Domingo'];
+    return $d[$n] ?? '';
+}
+
 $soy_el_jefe = ($_SESSION['correo'] == $solicitud['correo_jefe']);
 $soy_admin   = ($_SESSION['rol']    == 'admin');
 
@@ -101,6 +114,25 @@ if (empty($_SESSION['csrf_token'])) {
                 </div>
             </div>
             
+            <?php if ($solicitud['motivo'] === 'Permiso Recurrente' && !empty($recurrencia)): ?>
+            <!-- detalle de dias y horarios del permiso recurrente - paolo -->
+            <div class="mb-3 p-3" style="background-color:#FFF7CC; border:2px solid #FFCD00; border-radius:12px;">
+                <div class="label-dato" style="color:#8a6d00;">&#128197; Dias y horarios del permiso recurrente</div>
+                <ul class="mb-0 mt-2" style="color:#111; font-weight:500;">
+                    <?php foreach ($recurrencia as $rc):
+                        $dia_nom = nombreDiaSemanaGest((int)$rc['dia_semana']);
+                        $hi = date('g:i A', strtotime($rc['hora_inicio']));
+                        $hf = date('g:i A', strtotime($rc['hora_fin']));
+                    ?>
+                        <li><strong><?php echo htmlspecialchars($dia_nom, ENT_QUOTES, 'UTF-8'); ?>:</strong>
+                            <?php echo htmlspecialchars($hi . " a " . $hf, ENT_QUOTES, 'UTF-8'); ?></li>
+                    <?php endforeach; ?>
+                </ul>
+                <small class="d-block mt-2" style="color:#8a6d00;">
+                    Este horario se repite cada semana durante todo el periodo (Desde / Hasta).
+                </small>
+            </div>
+            <?php else: ?>
             <div class="mb-3">
                 <div class="label-dato">Horario</div>
                 <div class="valor-dato">
@@ -111,6 +143,7 @@ if (empty($_SESSION['csrf_token'])) {
                     ?>
                 </div>
             </div>
+            <?php endif; ?>
 
             <?php if ($solicitud['archivo_soporte']): ?>
             <div class="mb-4 text-center">
