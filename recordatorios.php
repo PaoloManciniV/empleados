@@ -70,7 +70,12 @@ foreach ($solicitudes as $sol) {
 
     $esVacaciones = (mb_strtolower(trim($sol['motivo'])) === 'vacaciones');
 
-    if ($esVacaciones) {
+    $esRecurrente = (trim($sol['motivo']) === 'Permiso Recurrente');
+
+    if ($esRecurrente) {
+        // ----- LOGICA DE PERMISO RECURRENTE (aviso cada dia que aplica) - paolo -----
+        $enviados += procesarRecurrente($db, $sol, $hoy, $horaActual, $ahora, $COPIAS_INTERNAS);
+    } elseif ($esVacaciones) {
         // ----- LÓGICA DE VACACIONES (avisos múltiples) -----
         $enviados += procesarVacaciones($db, $sol, $hoy, $horaActual, $COPIAS_INTERNAS);
     } else {
@@ -278,6 +283,132 @@ function enviarRecordatorio($sol, $tipo_aviso, $incluirEmpleado, $copias) {
     } catch (Exception $e) {
         error_log("recordatorios.php - fallo correo ID {$sol['id']}: " . $e->getMessage());
         echo "Error al enviar recordatorio para ID {$sol['id']}: " . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . "<br>";
+        return false;
+    }
+}
+
+
+/**
+ * Procesa el aviso de un PERMISO RECURRENTE para el dia de hoy. - paolo
+ * Si hoy cae dentro del periodo (fecha_inicio..fecha_fin) y hoy es uno de los
+ * dias configurados, envia el aviso 1 hora antes de la hora de inicio de ese dia.
+ * Usa recordatorios_log con tipo_aviso = "rec_YYYY-MM-DD" para no repetir el mismo dia.
+ * Avisa al JEFE + copias internas + EL PROPIO EMPLEADO.
+ * Devuelve cuantos correos envio.
+ */
+function procesarRecurrente($db, $sol, $hoy, $horaActual, $ahora, $copias) {
+    $enviadosLocal = 0;
+
+    // hoy debe estar dentro del periodo del permiso
+    if ($hoy < $sol['fecha_inicio'] || $hoy > $sol['fecha_fin']) {
+        return 0;
+    }
+
+    // dia de la semana de hoy en formato ISO: 1=lunes ... 7=domingo
+    $diaHoy = (int)date('N', strtotime($hoy));
+
+    // buscamos si la solicitud tiene configurado este dia
+    $q = $db->prepare("SELECT hora_inicio, hora_fin FROM solicitud_recurrencia WHERE solicitud_id = ? AND dia_semana = ? LIMIT 1");
+    $q->execute([$sol['id'], $diaHoy]);
+    $conf = $q->fetch(PDO::FETCH_ASSOC);
+
+    if (!$conf) {
+        return 0; // hoy no aplica para este permiso
+    }
+
+    // control anti-duplicado: un aviso por solicitud y por fecha concreta
+    $tipoAviso = 'rec_' . $hoy;
+    $chk = $db->prepare("SELECT 1 FROM recordatorios_log WHERE solicitud_id = ? AND tipo_aviso = ?");
+    $chk->execute([$sol['id'], $tipoAviso]);
+    if ($chk->fetchColumn()) {
+        return 0; // ya se aviso hoy
+    }
+
+    // enviamos 1 hora antes de la hora de inicio del dia (misma logica que "por horas")
+    $inicio_permiso     = strtotime($hoy . ' ' . $conf['hora_inicio']);
+    $tiempo_ahora       = strtotime($ahora);
+    $diferencia_minutos = ($inicio_permiso - $tiempo_ahora) / 60;
+
+    if ($diferencia_minutos > 0 && $diferencia_minutos <= 65) {
+        $ok = enviarRecordatorioRecurrente($sol, $conf, $copias);
+        if ($ok) {
+            try {
+                $ins = $db->prepare("INSERT INTO recordatorios_log (solicitud_id, tipo_aviso) VALUES (?, ?)");
+                $ins->execute([$sol['id'], $tipoAviso]);
+            } catch (Exception $e) {
+                error_log("recordatorios.php - log duplicado recurrente ID {$sol['id']} $tipoAviso: " . $e->getMessage());
+            }
+            $enviadosLocal++;
+            echo "&#9989; Aviso RECURRENTE enviado para ID {$sol['id']} ($hoy)<br>";
+        }
+    }
+
+    return $enviadosLocal;
+}
+
+
+/**
+ * Envia el correo de recordatorio para un dia puntual de un permiso recurrente. - paolo
+ * Destinatarios: jefe + copias internas + el propio empleado.
+ * $conf trae hora_inicio y hora_fin del dia de hoy.
+ */
+function enviarRecordatorioRecurrente($sol, $conf, $copias) {
+    try {
+        $mail = crearMailer();
+        $mail->setFrom(
+            $_ENV['MAIL_USER'] ?? 'permisos-agrocosta@zohomail.com',
+            'Agro-Costa Alertas'
+        );
+
+        // jefe
+        if (!empty($sol['correo_jefe'])) {
+            $mail->addAddress($sol['correo_jefe']);
+        }
+        // copias internas fijas
+        foreach ($copias as $c) {
+            if (!empty($c)) { $mail->addAddress($c); }
+        }
+        // el propio empleado (viene del LEFT JOIN en la consulta principal)
+        if (!empty($sol['correo_empleado'])) {
+            $mail->addAddress($sol['correo_empleado']);
+        }
+
+        $mail->isHTML(true);
+
+        $e_empleado = htmlspecialchars($sol['empleado'], ENT_QUOTES, 'UTF-8');
+        $hi = htmlspecialchars(date("g:i A", strtotime($conf['hora_inicio'])), ENT_QUOTES, 'UTF-8');
+        $hf = htmlspecialchars(date("g:i A", strtotime($conf['hora_fin'])),    ENT_QUOTES, 'UTF-8');
+        $dia_nom = ['','Lunes','Martes','Miercoles','Jueves','Viernes','Sabado','Domingo'][(int)date('N')];
+
+        $mail->Subject = "RECORDATORIO permiso recurrente ($dia_nom) — $e_empleado";
+
+        $mail->Body = "
+            <div style='background-color: #f8f9fa; padding: 20px; font-family: sans-serif;'>
+                <div style='max-width: 500px; margin: 0 auto; background-color: #ffffff; border: 1px solid #FFCD00; border-radius: 10px; overflow: hidden;'>
+                    <div style='background-color: #FFCD00; padding: 15px; text-align: center;'>
+                        <strong style='font-size: 18px;'>RECORDATORIO AUTOMATICO</strong>
+                    </div>
+                    <div style='padding: 20px;'>
+                        <p style='color: #333; font-weight:bold; font-size:15px;'>Permiso recurrente de hoy ($dia_nom)</p>
+                        <ul style='line-height: 1.8;'>
+                            <li><strong>Empleado:</strong> $e_empleado</li>
+                            <li><strong>Motivo:</strong> Permiso Recurrente (horario academico)</li>
+                            <li><strong>Hoy ($dia_nom):</strong> $hi a $hf</li>
+                        </ul>
+                        <p style='font-size: 12px; color: #999; margin-top: 20px; text-align: center;'>
+                            Este correo es solo informativo. No requiere respuesta.
+                        </p>
+                    </div>
+                </div>
+            </div>
+        ";
+
+        $mail->send();
+        return true;
+
+    } catch (Exception $e) {
+        error_log("recordatorios.php - fallo correo recurrente ID {$sol['id']}: " . $e->getMessage());
+        echo "Error al enviar recordatorio recurrente para ID {$sol['id']}: " . htmlspecialchars($e->getMessage(), ENT_QUOTES, 'UTF-8') . "<br>";
         return false;
     }
 }

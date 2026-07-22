@@ -250,6 +250,19 @@ function obtenerOpcionesHoras() {
     return $opciones;
 }
 $listadoHoras = obtenerOpcionesHoras();
+
+// nombre corto del dia de la semana 1=lunes ... 7=domingo - paolo
+function nombreDiaSemana($n) {
+    $dias = [1=>'Lunes',2=>'Martes',3=>'Miercoles',4=>'Jueves',5=>'Viernes',6=>'Sabado',7=>'Domingo'];
+    return $dias[$n] ?? '';
+}
+
+// trae la recurrencia (dias y horas) de una solicitud, ordenada por dia - paolo
+function obtenerRecurrencia($db, $solicitud_id) {
+    $q = $db->prepare("SELECT dia_semana, hora_inicio, hora_fin FROM solicitud_recurrencia WHERE solicitud_id = ? ORDER BY dia_semana ASC");
+    $q->execute([$solicitud_id]);
+    return $q->fetchAll(PDO::FETCH_ASSOC);
+}
 ?>
 <!DOCTYPE html>
 <html lang="es">
@@ -515,6 +528,7 @@ $listadoHoras = obtenerOpcionesHoras();
                             <option value="Vacaciones">Vacaciones</option>
                             <option value="Licencia No Remunerada">Licencia No Remunerada</option>
                             <option value="Calamidad Doméstica">Calamidad Doméstica</option>
+                            <option value="Permiso Recurrente">Permiso Recurrente (horario academico)</option>
                             <option value="Otros">Permiso excepcional</option>
                         </select>
                     </div>
@@ -533,6 +547,62 @@ $listadoHoras = obtenerOpcionesHoras();
                         <small class="d-block mt-1" style="color:#8a6d00;">
                             Este texto se enviará junto con la solicitud a Recursos Humanos.
                         </small>
+                    </div>
+
+                    <!-- seccion de dias y horarios para permiso recurrente - paolo -->
+                    <!-- las fechas inicio y fin definen el periodo (los meses) y aqui -->
+                    <!-- se marcan los dias de la semana con su horario propio cada uno -->
+                    <div class="mb-3" id="contenedorRecurrente" style="display:none;">
+                        <div class="p-3 rounded" style="background-color:#FFF7CC; border:2px solid #FFCD11;">
+                            <label class="fw-bold d-block mb-2" style="color:#8a6d00;">
+                                &#128197; DIAS Y HORARIOS DEL PERMISO <span style="color:#c00;">*</span>
+                            </label>
+                            <small class="d-block mb-3" style="color:#8a6d00;">
+                                Marca los dias de la semana que apliquen y define el horario de cada uno.
+                                El periodo lo definen las fechas Inicio y Fin de abajo.
+                            </small>
+                            <?php
+                            // dias en orden lunes(1) a domingo(7) estilo ISO - paolo
+                            $dias_semana_rec = [
+                                1 => 'Lunes', 2 => 'Martes', 3 => 'Miercoles', 4 => 'Jueves',
+                                5 => 'Viernes', 6 => 'Sabado', 7 => 'Domingo'
+                            ];
+                            foreach ($dias_semana_rec as $num => $nombre):
+                            ?>
+                            <div class="rec-dia-row mb-2 p-2 rounded" style="background:#fff; border:1px solid #FFE38A;">
+                                <div class="form-check mb-1">
+                                    <input class="form-check-input rec-dia-check" type="checkbox"
+                                           name="rec_dia[<?php echo $num; ?>]" value="1"
+                                           id="recDia<?php echo $num; ?>"
+                                           onchange="toggleHorasDia(<?php echo $num; ?>)">
+                                    <label class="form-check-label fw-bold" for="recDia<?php echo $num; ?>">
+                                        <?php echo $nombre; ?>
+                                    </label>
+                                </div>
+                                <div class="row g-2 rec-horas-dia" id="recHoras<?php echo $num; ?>" style="display:none;">
+                                    <div class="col-6">
+                                        <select name="rec_hora_ini[<?php echo $num; ?>]" class="form-select form-select-sm rec-hora-select">
+                                            <option value="">Hora inicio</option>
+                                            <?php foreach ($listadoHoras as $hora): ?>
+                                                <option value="<?php echo htmlspecialchars($hora, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($hora, ENT_QUOTES, 'UTF-8'); ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                    <div class="col-6">
+                                        <select name="rec_hora_fin[<?php echo $num; ?>]" class="form-select form-select-sm rec-hora-select">
+                                            <option value="">Hora fin</option>
+                                            <?php foreach ($listadoHoras as $hora): ?>
+                                                <option value="<?php echo htmlspecialchars($hora, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($hora, ENT_QUOTES, 'UTF-8'); ?></option>
+                                            <?php endforeach; ?>
+                                        </select>
+                                    </div>
+                                </div>
+                            </div>
+                            <?php endforeach; ?>
+                            <span id="asteriscoRec" class="text-danger small fw-bold" style="display:none;">
+                                * Marca al menos un dia y completa su horario
+                            </span>
+                        </div>
                     </div>
 
                     <div class="mb-3">
@@ -769,6 +839,25 @@ $listadoHoras = obtenerOpcionesHoras();
                                             &#9888; <?php echo htmlspecialchars($row['detalle_permiso'], ENT_QUOTES, 'UTF-8'); ?>
                                         </span>
                                     <?php endif; ?>
+                                    <?php
+                                    // si es permiso recurrente mostramos los dias con su horario - paolo
+                                    if ($row['motivo'] === 'Permiso Recurrente'):
+                                        $rec = obtenerRecurrencia($db, (int)$row['id']);
+                                        if (!empty($rec)):
+                                    ?>
+                                        <div class="mt-1">
+                                        <?php foreach ($rec as $rc):
+                                            $dia_nom = nombreDiaSemana((int)$rc['dia_semana']);
+                                            $hi = date('g:i A', strtotime($rc['hora_inicio']));
+                                            $hf = date('g:i A', strtotime($rc['hora_fin']));
+                                        ?>
+                                            <span class="d-inline-block mt-1 me-1 px-2 py-1"
+                                                  style="background-color:#FFF7CC; border:1px solid #FFCD11; border-radius:6px; color:#8a6d00; font-size:0.72rem;">
+                                                &#128197; <?php echo htmlspecialchars($dia_nom . ' ' . $hi . ' - ' . $hf, ENT_QUOTES, 'UTF-8'); ?>
+                                            </span>
+                                        <?php endforeach; ?>
+                                        </div>
+                                    <?php endif; endif; ?>
                                 </td>
                                 <td data-label="Soportes" class="small">
                                     <?php if (count($archivos) > 0): ?>
@@ -964,6 +1053,37 @@ $listadoHoras = obtenerOpcionesHoras();
             contenedorOtro.style.display = 'none';
             otroInput.value = '';
         }
+
+        // mostrar u ocultar la seccion de dias y horarios del permiso recurrente - paolo
+        var contRec = document.getElementById('contenedorRecurrente');
+        if (m === 'Permiso Recurrente') {
+            contRec.style.display = 'block';
+        } else {
+            contRec.style.display = 'none';
+            // limpiar los dias marcados y sus horas al cambiar de tipo
+            document.querySelectorAll('.rec-dia-check').forEach(function(chk) {
+                chk.checked = false;
+            });
+            document.querySelectorAll('.rec-horas-dia').forEach(function(div) {
+                div.style.display = 'none';
+            });
+            document.querySelectorAll('.rec-hora-select').forEach(function(sel) {
+                sel.value = '';
+            });
+        }
+    }
+
+    // muestra u oculta las horas de un dia segun este marcado o no - paolo
+    function toggleHorasDia(num) {
+        var chk  = document.getElementById('recDia' + num);
+        var caja = document.getElementById('recHoras' + num);
+        if (chk.checked) {
+            caja.style.display = 'flex';
+        } else {
+            caja.style.display = 'none';
+            // si desmarcan el dia, limpiamos sus horas
+            caja.querySelectorAll('select').forEach(function(sel) { sel.value = ''; });
+        }
     }
 
     function actualizarResumen() {
@@ -1029,7 +1149,43 @@ $listadoHoras = obtenerOpcionesHoras();
             }
         }
 
+        // validacion del permiso recurrente: al menos un dia marcado con su horario - paolo
+        if (m === 'Permiso Recurrente') {
+            var diasMarcados = document.querySelectorAll('.rec-dia-check:checked');
+            if (diasMarcados.length === 0) {
+                document.getElementById('asteriscoRec').style.display = 'block';
+                alert("Marca al menos un dia de la semana para el permiso recurrente.");
+                return false;
+            }
+            // por cada dia marcado, verificar que tenga hora inicio y fin, y que fin sea mayor
+            for (var d = 0; d < diasMarcados.length; d++) {
+                var num  = diasMarcados[d].value === '1'
+                         ? diasMarcados[d].id.replace('recDia','')
+                         : diasMarcados[d].id.replace('recDia','');
+                var hIni = document.querySelector('select[name="rec_hora_ini[' + num + ']"]').value;
+                var hFin = document.querySelector('select[name="rec_hora_fin[' + num + ']"]').value;
+                if (hIni === '' || hFin === '') {
+                    alert("Completa la hora de inicio y fin en todos los dias que marcaste.");
+                    return false;
+                }
+                // comparar en formato 24h para validar que fin sea despues de inicio
+                if (aMinutos(hIni) >= aMinutos(hFin)) {
+                    alert("En uno de los dias la hora fin no es posterior a la hora inicio. Corrigelo.");
+                    return false;
+                }
+            }
+        }
+
         return true;
+    }
+
+    // convierte "8:30 AM" / "2:00 PM" a minutos desde medianoche para comparar - paolo
+    function aMinutos(hhmm12) {
+        var m = hhmm12.match(/(\d+):(\d+)\s*(AM|PM)/i);
+        if (!m) return 0;
+        var h = parseInt(m[1], 10) % 12;
+        if (/PM/i.test(m[3])) h += 12;
+        return h * 60 + parseInt(m[2], 10);
     }
 
     function analizarDispositivo(ua) {
